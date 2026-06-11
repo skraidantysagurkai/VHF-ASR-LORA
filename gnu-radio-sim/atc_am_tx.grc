@@ -1,0 +1,512 @@
+options:
+  parameters:
+    author: ATC Simulation
+    catch_exceptions: 'True'
+    category: '[GRC Hier Blocks]'
+    cmake_opt: ''
+    comment: 'ATC VHF AM Transmitter Simulation
+
+      Simulates DSB-FC AM modulation used in ATC communications (118-137 MHz band).
+
+      Input: Mono WAV file (8000 Hz sample rate, 16-bit PCM)
+
+      Output: ZMQ PUB socket → connect to atc_am_rx.grc
+
+      Channel model simulates VHF propagation (AWGN + light multipath).'
+    copyright: ''
+    description: ATC VHF DSB-FC AM Transmitter Simulation (no hardware required)
+    gen_cmake: 'On'
+    gen_linking: dynamic
+    hier_block_src_path: '.:'
+    id: atc_am_tx
+    max_nouts: '0'
+    output_language: python
+    placement: (0,0)
+    qt_qss_theme: ''
+    realtime_scheduling: ''
+    run: 'True'
+    run_command: '{python} -u {filename}'
+    run_options: prompt
+    sizing_mode: fixed
+    thread_safe_setters: ''
+    title: ATC VHF AM Transmitter Simulation
+    window_size: (1280,1024)
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+
+blocks:
+- name: audio_rate
+  id: variable
+  parameters:
+    comment: 'ATC audio is 8 kHz, mono, 300-3400 Hz voice band'
+    value: '8000'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [200, 8]
+    rotation: 0
+    state: enabled
+
+- name: quad_rate
+  id: variable
+  parameters:
+    comment: 'Quadrature (IF) sample rate. Must be integer multiple of audio_rate.
+      240000 / 8000 = 30x interpolation. Gives 120 kHz bandwidth headroom (> 25 kHz ATC channel).'
+    value: '240000'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [360, 8]
+    rotation: 0
+    state: enabled
+
+- name: if_freq
+  id: variable
+  parameters:
+    comment: 'Intermediate frequency carrier (Hz). Simulates the RF carrier offset
+      in baseband. 10 kHz places carrier well within our 120 kHz bandwidth.'
+    value: '10000'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [520, 8]
+    rotation: 0
+    state: enabled
+
+- name: mod_index
+  id: variable_qtgui_range
+  parameters:
+    comment: 'AM modulation index (0.0 to 1.0). ATC typically uses 0.85-0.95
+      (85-95% modulation). Values > 1.0 cause overmodulation / distortion.'
+    gui_hint: 0,0,1,1
+    label: Modulation Index
+    min_len: '200'
+    orient: QtCore.Qt.Horizontal
+    rangeType: float
+    start: '0.0'
+    step: '0.01'
+    stop: '1.0'
+    value: '0.9'
+    widget: counter_slider
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [680, 8]
+    rotation: 0
+    state: enabled
+
+- name: noise_voltage
+  id: variable_qtgui_range
+  parameters:
+    comment: 'AWGN noise amplitude. 0.0 = no noise (ideal channel). 0.05 = ~26 dB SNR
+      (good VHF). 0.2 = ~14 dB SNR (marginal). 0.5 = very noisy / degraded.'
+    gui_hint: 0,1,1,1
+    label: Channel Noise
+    min_len: '200'
+    orient: QtCore.Qt.Horizontal
+    rangeType: float
+    start: '0.0'
+    step: '0.005'
+    stop: '0.5'
+    value: '0.05'
+    widget: counter_slider
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [840, 8]
+    rotation: 0
+    state: enabled
+
+- name: freq_offset
+  id: variable_qtgui_range
+  parameters:
+    comment: 'Normalised frequency offset (fraction of sample rate). Simulates
+      Doppler shift or oscillator drift. 0.0 = no offset. 0.001 = 240 Hz shift at 240 kHz SR.'
+    gui_hint: 0,2,1,1
+    label: Freq Offset (norm.)
+    min_len: '200'
+    orient: QtCore.Qt.Horizontal
+    rangeType: float
+    start: '-0.01'
+    step: '0.0001'
+    stop: '0.01'
+    value: '0.0'
+    widget: counter_slider
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1000, 8]
+    rotation: 0
+    state: enabled
+
+- name: wav_file_path
+  id: variable
+  parameters:
+    comment: 'Path to your input WAV file. Must be:
+      - Mono (single channel)
+      - 8000 Hz sample rate (or resample to match audio_rate)
+      - 16-bit PCM
+      Convert FLAC: ffmpeg -i input.flac -ar 8000 -ac 1 -acodec pcm_s16le input.wav'
+    value: '"/Users/ezka/PycharmProjects/VHF-ASR/data/input_audio.wav"'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [200, 80]
+    rotation: 0
+    state: enabled
+
+- name: zmq_address
+  id: variable
+  parameters:
+    comment: 'ZMQ socket address. Transmitter PUBs here; Receiver SUBs here.
+      Use tcp://127.0.0.1:55555 for local loopback (same machine).'
+    value: '"tcp://127.0.0.1:55555"'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [360, 80]
+    rotation: 0
+    state: enabled
+
+# ─── SOURCE ─────────────────────────────────────────────────────────────────
+
+- name: blocks_wavfile_source_0
+  id: blocks_wavfile_source
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: 'Reads mono WAV audio file. Output is float in range [-1, +1].
+      repeat=True loops the file continuously for sustained simulation.'
+    file: wav_file_path
+    nchan: '1'
+    repeat: 'True'
+    sample_rate: audio_rate
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [40, 200]
+    rotation: 0
+    state: enabled
+
+# ─── AUDIO BAND-PASS FILTER (ATC voice band: 300 Hz – 3400 Hz) ──────────────
+
+- name: band_pass_filter_0
+  id: band_pass_filter
+  parameters:
+    affinity: ''
+    alias: ''
+    beta: '6.76'
+    comment: 'Restricts audio to the ATC voice telephony band: 300 Hz to 3400 Hz.
+      This matches real ATC radio bandwidth. Kaiser window β=6.76 gives good
+      stopband attenuation with moderate transition width.'
+    decim: '1'
+    gain: '1'
+    high_cutoff_freq: '3400'
+    interp: '1'
+    low_cutoff_freq: '300'
+    samp_rate: audio_rate
+    type: fir_filter_fff
+    width: '100'
+    win: window.WIN_KAISER
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [240, 200]
+    rotation: 0
+    state: enabled
+
+# ─── AM MODULATION: DSB-FC ───────────────────────────────────────────────────
+# DSB-FC AM = (1 + m * audio) * cos(2πf_c * t)
+# In GRC: audio → ×mod_index → +1.0 → × carrier → interpolate to quad_rate
+
+- name: blocks_multiply_const_vxx_0
+  id: blocks_multiply_const_vxx
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: 'Apply modulation index m. Scales audio to range [-m, +m].
+      For 90% modulation: output range is [-0.9, +0.9].'
+    const: mod_index
+    type: float
+    vlen: '1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [440, 200]
+    rotation: 0
+    state: enabled
+
+- name: blocks_add_const_vxx_0
+  id: blocks_add_const_vxx
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: 'Add DC offset = 1.0 to create full-carrier AM.
+      Result: 1 + m*audio → range [1-m, 1+m] = [0.1, 1.9] at m=0.9.
+      This is DSB-FC (full carrier), as used in ATC / aviation.'
+    const: '1.0'
+    type: float
+    vlen: '1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [600, 200]
+    rotation: 0
+    state: enabled
+
+- name: rational_resampler_xxx_0
+  id: rational_resampler_xxx
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: 'Upsample audio from audio_rate (8000 Hz) to quad_rate (240000 Hz).
+      Interpolation factor = 240000/8000 = 30.
+      This prepares the modulating signal for multiplication with the IF carrier.'
+    decim: '1'
+    fbw: '0'
+    interp: '30'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    taps: ''
+    type: fff
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [760, 200]
+    rotation: 0
+    state: enabled
+
+- name: analog_sig_source_x_0
+  id: analog_sig_source_x
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: 'IF carrier oscillator at if_freq (10 kHz).
+      Generates cos wave at quad_rate. This is the "RF" carrier in baseband simulation.'
+    amp: '1'
+    freq: if_freq
+    offset: '0'
+    phase: '0'
+    samp_rate: quad_rate
+    type: float
+    waveform: analog.GR_COS_WAVE
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [760, 320]
+    rotation: 0
+    state: enabled
+
+- name: blocks_multiply_xx_0
+  id: blocks_multiply_xx
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: 'DSB-FC AM modulation: multiply (1 + m*audio) by carrier.
+      Output is the AM signal: [1 + m*audio(t)] × cos(2π×if_freq×t)'
+    num_inputs: '2'
+    type: float
+    vlen: '1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [940, 240]
+    rotation: 0
+    state: enabled
+
+# ─── CONVERT TO COMPLEX IQ (required by Channel Model block) ─────────────────
+
+- name: blocks_float_to_complex_0
+  id: blocks_float_to_complex
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: 'Convert real AM signal to complex IQ (imaginary part = 0).
+      The Channel Model block requires complex input.
+      The receiver will use AM Demod (envelope detection) on the complex signal.'
+    vlen: '1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1100, 200]
+    rotation: 0
+    state: enabled
+
+# ─── CHANNEL MODEL (VHF propagation simulation) ──────────────────────────────
+
+- name: channels_channel_model_0
+  id: channels_channel_model
+  parameters:
+    affinity: ''
+    alias: ''
+    block_tags: 'False'
+    comment: 'Simulates VHF air-ground channel impairments:
+      - AWGN: additive white Gaussian noise (set by noise_voltage slider)
+      - freq_offset: normalised Doppler / oscillator drift
+      - epsilon=1.0: no sample clock offset (software sim, perfect clocking)
+      - taps=[1, 0, 0.05, 0, 0.02]: light multipath (terrain/building reflections)
+        Tap delays at 1/quad_rate ≈ 4.2 µs intervals
+      VHF ATC channels are generally LOS with mild multipath near airports.'
+    epsilon: '1.0'
+    freq_offset: freq_offset
+    noise_seed: '0'
+    noise_voltage: noise_voltage
+    taps: '[1.0, 0.0, 0.05, 0.0, 0.02]'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1100, 340]
+    rotation: 0
+    state: enabled
+
+# ─── SPECTRUM DISPLAY ────────────────────────────────────────────────────────
+
+- name: qtgui_freq_sink_x_0
+  id: qtgui_freq_sink_x
+  parameters:
+    affinity: ''
+    alias: ''
+    alpha1: '1.0'
+    alpha10: '1.0'
+    alpha2: '1.0'
+    alpha3: '1.0'
+    alpha4: '1.0'
+    alpha5: '1.0'
+    alpha6: '1.0'
+    alpha7: '1.0'
+    alpha8: '1.0'
+    alpha9: '1.0'
+    autoscale: 'False'
+    average: '1.0'
+    axislabels: 'True'
+    bw: quad_rate
+    color1: '"blue"'
+    color10: '"dark blue"'
+    color2: '"red"'
+    color3: '"green"'
+    color4: '"black"'
+    color5: '"cyan"'
+    color6: '"magenta"'
+    color7: '"yellow"'
+    color8: '"dark red"'
+    color9: '"dark green"'
+    comment: 'Spectrum of the AM signal after channel model.
+      You should see: carrier spike at 10 kHz ± voice sidebands (300-3400 Hz each side).
+      DSB-FC: two symmetric sidebands + strong carrier. Total BW ≈ 6.8 kHz (< 25 kHz ATC channel).'
+    ctrlpanel: 'False'
+    fc: '0'
+    fftsize: '2048'
+    freqhalf: 'True'
+    grid: 'True'
+    gui_hint: 1,0,2,3
+    label: AM Signal Spectrum (post-channel)
+    label1: AM + Channel
+    label10: ''
+    label2: ''
+    label3: ''
+    label4: ''
+    label5: ''
+    label6: ''
+    label7: ''
+    label8: ''
+    label9: ''
+    legend: 'True'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    name: '"ATC AM Transmitter Spectrum"'
+    nconnections: '1'
+    norm_window: 'False'
+    showports: 'False'
+    tr_chan: '0'
+    tr_level: '0.0'
+    tr_mode: qtgui.TRIG_MODE_FREE
+    tr_tag: '""'
+    type: complex
+    units: dB
+    update_time: '0.10'
+    width1: '1'
+    width10: '1'
+    width2: '1'
+    width3: '1'
+    width4: '1'
+    width5: '1'
+    width6: '1'
+    width7: '1'
+    width8: '1'
+    width9: '1'
+    wintype: window.WIN_BLACKMAN_hARRIS
+    ymax: '10'
+    ymin: '-80'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1280, 200]
+    rotation: 0
+    state: enabled
+
+# ─── ZMQ OUTPUT ─────────────────────────────────────────────────────────────
+
+- name: zeromq_pub_sink_0
+  id: zeromq_pub_sink
+  parameters:
+    address: zmq_address
+    affinity: ''
+    alias: ''
+    comment: 'Publishes the channel-impaired AM signal over ZMQ.
+      The receiver flowgraph (atc_am_rx.grc) subscribes to this address.
+      Run TX first, then RX. Both must use the same zmq_address.'
+    drop_on_hwm: 'True'
+    hwm: '-1'
+    key: ''
+    pass_tags: 'False'
+    timeout: '100'
+    type: complex
+    vlen: '1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1280, 360]
+    rotation: 0
+    state: enabled
+
+# ─── CONNECTIONS ─────────────────────────────────────────────────────────────
+
+connections:
+- [blocks_wavfile_source_0, '0', band_pass_filter_0, '0']
+- [band_pass_filter_0, '0', blocks_multiply_const_vxx_0, '0']
+- [blocks_multiply_const_vxx_0, '0', blocks_add_const_vxx_0, '0']
+- [blocks_add_const_vxx_0, '0', rational_resampler_xxx_0, '0']
+- [rational_resampler_xxx_0, '0', blocks_multiply_xx_0, '0']
+- [analog_sig_source_x_0, '0', blocks_multiply_xx_0, '1']
+- [blocks_multiply_xx_0, '0', blocks_float_to_complex_0, '0']
+- [blocks_float_to_complex_0, '0', channels_channel_model_0, '0']
+- [channels_channel_model_0, '0', qtgui_freq_sink_x_0, '0']
+- [channels_channel_model_0, '0', zeromq_pub_sink_0, '0']
+
+metadata:
+  file_format: 1
+  grc_version: 3.10.0.0

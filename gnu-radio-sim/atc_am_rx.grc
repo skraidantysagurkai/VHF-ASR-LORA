@@ -1,0 +1,467 @@
+options:
+  parameters:
+    author: ATC Simulation
+    catch_exceptions: 'True'
+    category: '[GRC Hier Blocks]'
+    cmake_opt: ''
+    comment: 'ATC VHF AM Receiver Simulation
+
+      Demodulates DSB-FC AM signal from atc_am_tx.grc.
+
+      Input: ZMQ SUB socket (connect to atc_am_tx.grc ZMQ PUB)
+
+      Output: Recovered audio saved as WAV file.
+
+      Chain: ZMQ → BPF (25 kHz ATC channel) → AGC → AM Demod → LPF → Resample → WAV Sink'
+    copyright: ''
+    description: ATC VHF DSB-FC AM Receiver Simulation (no hardware required)
+    gen_cmake: 'On'
+    gen_linking: dynamic
+    hier_block_src_path: '.:'
+    id: atc_am_rx
+    max_nouts: '0'
+    output_language: python
+    placement: (0,0)
+    qt_qss_theme: ''
+    realtime_scheduling: ''
+    run: 'True'
+    run_command: '{python} -u {filename}'
+    run_options: prompt
+    sizing_mode: fixed
+    thread_safe_setters: ''
+    title: ATC VHF AM Receiver Simulation
+    window_size: (1280,1024)
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+
+# ─── VARIABLES ───────────────────────────────────────────────────────────────
+
+- name: audio_rate
+  id: variable
+  parameters:
+    comment: 'Output audio sample rate. 8000 Hz = standard telephony / ATC.
+      Must match audio_rate in atc_am_tx.grc.'
+    value: '8000'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [200, 8]
+    rotation: 0
+    state: enabled
+
+- name: quad_rate
+  id: variable
+  parameters:
+    comment: 'Must match quad_rate in atc_am_tx.grc (240000 Hz).'
+    value: '240000'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [360, 8]
+    rotation: 0
+    state: enabled
+
+- name: if_freq
+  id: variable
+  parameters:
+    comment: 'Must match if_freq in atc_am_tx.grc (10000 Hz). This is the carrier
+      frequency the receiver will tune to within the baseband.'
+    value: '10000'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [520, 8]
+    rotation: 0
+    state: enabled
+
+- name: channel_bw
+  id: variable
+  parameters:
+    comment: 'ATC channel bandwidth in Hz. 25 kHz standard (most of the world).
+      8330 Hz for European 8.33 kHz channel spacing.
+      The BPF passes if_freq ± channel_bw/2.'
+    value: '25000'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [680, 8]
+    rotation: 0
+    state: enabled
+
+- name: volume
+  id: variable_qtgui_range
+  parameters:
+    comment: 'Output audio volume multiplier.'
+    gui_hint: 0,0,1,1
+    label: Volume
+    min_len: '200'
+    orient: QtCore.Qt.Horizontal
+    rangeType: float
+    start: '0.0'
+    step: '0.05'
+    stop: '3.0'
+    value: '1.0'
+    widget: counter_slider
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [840, 8]
+    rotation: 0
+    state: enabled
+
+- name: squelch_threshold
+  id: variable_qtgui_range
+  parameters:
+    comment: 'Power squelch threshold in dB. Signals below this level are muted.
+      Simulates squelch behaviour of ATC radio receivers.
+      -60 dB = open squelch (pass everything). -20 dB = tight squelch.'
+    gui_hint: 0,1,1,1
+    label: Squelch (dBFS)
+    min_len: '200'
+    orient: QtCore.Qt.Horizontal
+    rangeType: float
+    start: '-80'
+    step: '1'
+    stop: '0'
+    value: '-60'
+    widget: counter_slider
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1000, 8]
+    rotation: 0
+    state: enabled
+
+- name: zmq_address
+  id: variable
+  parameters:
+    comment: 'Must match zmq_address in atc_am_tx.grc.'
+    value: '"tcp://127.0.0.1:55555"'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [200, 80]
+    rotation: 0
+    state: enabled
+
+- name: output_wav_path
+  id: variable
+  parameters:
+    comment: 'Path where the received/demodulated audio will be saved as WAV.
+      File will be 8000 Hz mono 32-bit float PCM.
+      Play back with: aplay -f FLOAT_LE -r 8000 output.wav
+      Or: ffplay output.wav'
+    value: '"/Users/ezka/PycharmProjects/VHF-ASR/data/received_atc_audio.wav"'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [360, 80]
+    rotation: 0
+    state: enabled
+
+blocks:
+
+# ─── ZMQ INPUT ───────────────────────────────────────────────────────────────
+
+- name: zeromq_sub_source_0
+  id: zeromq_sub_source
+  parameters:
+    address: zmq_address
+    affinity: ''
+    alias: ''
+    comment: 'Receives complex IQ samples from the transmitter flowgraph.
+      Start atc_am_tx.grc first, then run this flowgraph.
+      Timeout=100ms: if TX stops, RX blocks briefly then resumes polling.'
+    hwm: '-1'
+    key: ''
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    pass_tags: 'False'
+    timeout: '100'
+    type: complex
+    vlen: '1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [40, 220]
+    rotation: 0
+    state: enabled
+
+# ─── CHANNELIZER: Freq Xlating FIR Filter ────────────────────────────────────
+# Tunes to the IF carrier frequency and extracts the ATC channel bandwidth.
+# This mimics the IF filter stage of a real ATC receiver.
+
+- name: freq_xlating_fir_filter_xxx_0
+  id: freq_xlating_fir_filter_xxx
+  parameters:
+    affinity: ''
+    alias: ''
+    center_freq: if_freq
+    comment: 'Frequency-translating FIR filter: channelizer + downconverter.
+      Shifts the spectrum so that if_freq (10 kHz carrier) moves to DC (0 Hz).
+      Simultaneously low-pass filters to channel_bw/2 = 12500 Hz half-bandwidth.
+      Decimates by 6: 240000 / 6 = 40000 Hz output sample rate.
+      This gives 40 kHz bandwidth > 25 kHz ATC channel. Good headroom.'
+    decim: '6'
+    gain: '1'
+    samp_rate: quad_rate
+    taps: firdes.low_pass(1.0, quad_rate, channel_bw/2, 2500, window.WIN_KAISER, 6.76)
+    type: ccc
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [240, 220]
+    rotation: 0
+    state: enabled
+
+# ─── AGC (Automatic Gain Control) ────────────────────────────────────────────
+
+- name: analog_agc_xx_0
+  id: analog_agc_xx
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: 'Automatic Gain Control. Normalises signal amplitude before demodulation.
+      ATC receivers always use AGC to handle signal level variations from
+      aircraft at different distances/elevations.
+      rate=1e-4: slow AGC (voice-appropriate, avoids pumping on syllables).
+      reference=1.0: target output amplitude.'
+    gain: '1.0'
+    max_gain: '65536'
+    rate: 1e-4
+    reference: '1.0'
+    type: complex
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [460, 220]
+    rotation: 0
+    state: enabled
+
+# ─── POWER SQUELCH ───────────────────────────────────────────────────────────
+
+- name: analog_pwr_squelch_xx_0
+  id: analog_pwr_squelch_xx
+  parameters:
+    affinity: ''
+    alias: ''
+    alpha: '0.01'
+    comment: 'Power squelch: gates audio when signal level drops below threshold.
+      Simulates squelch found in all ATC transceivers.
+      alpha=0.01: slow power estimation (avoids squelch chatter on voice).
+      gate=True: outputs zero samples (not silence) when squelched.'
+    gate: 'True'
+    ramp: '10'
+    threshold: squelch_threshold
+    type: complex
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [640, 220]
+    rotation: 0
+    state: enabled
+
+# ─── AM DEMODULATION (DSB-FC envelope detection) ─────────────────────────────
+
+- name: analog_am_demod_cf_0
+  id: analog_am_demod_cf
+  parameters:
+    affinity: ''
+    alias: ''
+    audio_decim: '5'
+    audio_pass: '3400'
+    audio_stop: '4000'
+    chan_rate: '40000'
+    comment: 'AM demodulator. Performs envelope detection on the DSB-FC AM signal.
+      Equivalent to: Complex to Mag → Add Const (-DC) → Low Pass Filter.
+      audio_decim=5: 40000/5 = 8000 Hz output sample rate (matches audio_rate).
+      audio_pass=3400 Hz: ATC voice band upper limit.
+      audio_stop=4000 Hz: transition band edge.
+      Output is float in range [-1.0, +1.0].'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [840, 220]
+    rotation: 0
+    state: enabled
+
+# ─── VOLUME CONTROL ──────────────────────────────────────────────────────────
+
+- name: blocks_multiply_const_vxx_0
+  id: blocks_multiply_const_vxx
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: 'Volume / gain control on the demodulated audio.'
+    const: volume
+    type: float
+    vlen: '1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1020, 220]
+    rotation: 0
+    state: enabled
+
+# ─── DISPLAYS ────────────────────────────────────────────────────────────────
+
+- name: qtgui_freq_sink_x_0
+  id: qtgui_freq_sink_x
+  parameters:
+    affinity: ''
+    alias: ''
+    alpha1: '1.0'
+    alpha2: '1.0'
+    autoscale: 'False'
+    average: '0.2'
+    axislabels: 'True'
+    bw: quad_rate
+    color1: '"cyan"'
+    color2: '"red"'
+    comment: 'Spectrum of received signal before demodulation.
+      Expect: carrier at ~0 Hz (after freq xlating), two voice sidebands ±300-3400 Hz.
+      Noise floor visible if noise_voltage > 0 in transmitter.'
+    ctrlpanel: 'False'
+    fc: '0'
+    fftsize: '2048'
+    freqhalf: 'True'
+    grid: 'True'
+    gui_hint: 1,0,2,2
+    label: Received AM Spectrum
+    label1: After Channelizer
+    label2: ''
+    legend: 'True'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    name: '"Received ATC AM Signal"'
+    nconnections: '1'
+    norm_window: 'False'
+    showports: 'False'
+    tr_chan: '0'
+    tr_level: '0.0'
+    tr_mode: qtgui.TRIG_MODE_FREE
+    tr_tag: '""'
+    type: complex
+    units: dB
+    update_time: '0.10'
+    width1: '1'
+    width2: '1'
+    wintype: window.WIN_BLACKMAN_hARRIS
+    ymax: '10'
+    ymin: '-80'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [460, 360]
+    rotation: 0
+    state: enabled
+
+- name: qtgui_time_sink_x_0
+  id: qtgui_time_sink_x
+  parameters:
+    affinity: ''
+    alias: ''
+    alpha1: '1.0'
+    alpha2: '1.0'
+    autoscale: 'True'
+    axislabels: 'True'
+    color1: '"blue"'
+    color2: '"red"'
+    comment: 'Time-domain waveform of demodulated ATC audio.
+      You should see voice waveform envelope when transmission is active.
+      Flat line when squelched or between transmissions.'
+    grid: 'True'
+    gui_hint: 1,2,2,1
+    label: Demodulated Audio
+    label1: Audio Out
+    label2: ''
+    legend: 'True'
+    marker1: '-1'
+    marker2: '-1'
+    name: '"Demodulated ATC Audio"'
+    nconnections: '1'
+    npoints: '8000'
+    samp_rate: audio_rate
+    showports: 'False'
+    stem_plot: 'False'
+    tr_chan: '0'
+    tr_level: '0.0'
+    tr_mode: qtgui.TRIG_MODE_FREE
+    tr_tag: '""'
+    type: float
+    update_time: '0.10'
+    width1: '1'
+    width2: '1'
+    ylabel: Amplitude
+    ymax: '1'
+    ymin: '-1'
+    yunit: '""'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1020, 360]
+    rotation: 0
+    state: enabled
+
+# ─── WAV FILE OUTPUT ─────────────────────────────────────────────────────────
+
+- name: blocks_wavfile_sink_0
+  id: blocks_wavfile_sink
+  parameters:
+    affinity: ''
+    alias: ''
+    bits_per_sample: '16'
+    comment: 'Saves demodulated audio to WAV file.
+      Output: 8000 Hz, mono, 16-bit PCM.
+      File is written continuously while flowgraph runs.
+      Stop the flowgraph to close/finalise the file before playing it back.
+      Play back: ffplay /path/to/received_atc_audio.wav
+      Or convert to FLAC: ffmpeg -i received.wav received.flac'
+    file: output_wav_path
+    format: FORMAT_WAV
+    nchan: '1'
+    samp_rate: audio_rate
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1200, 220]
+    rotation: 0
+    state: enabled
+
+# ─── CONNECTIONS ─────────────────────────────────────────────────────────────
+
+connections:
+- [zeromq_sub_source_0, '0', freq_xlating_fir_filter_xxx_0, '0']
+- [freq_xlating_fir_filter_xxx_0, '0', analog_agc_xx_0, '0']
+- [freq_xlating_fir_filter_xxx_0, '0', qtgui_freq_sink_x_0, '0']
+- [analog_agc_xx_0, '0', analog_pwr_squelch_xx_0, '0']
+- [analog_pwr_squelch_xx_0, '0', analog_am_demod_cf_0, '0']
+- [analog_am_demod_cf_0, '0', blocks_multiply_const_vxx_0, '0']
+- [blocks_multiply_const_vxx_0, '0', qtgui_time_sink_x_0, '0']
+- [blocks_multiply_const_vxx_0, '0', blocks_wavfile_sink_0, '0']
+
+metadata:
+  file_format: 1
+  grc_version: 3.10.0.0

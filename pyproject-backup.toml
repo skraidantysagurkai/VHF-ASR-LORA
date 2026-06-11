@@ -1,0 +1,47 @@
+[project]
+name = "vhf-asr"
+version = "0.1.0"
+requires-python = ">=3.13, < 3.14"
+dependencies = [
+    "datasets>=4.8.5",
+    "ffmpeg>=1.4",
+    "jupyter>=1.1.1",
+    "jupyterlab>=4.5.7",
+    "librosa>=0.11.0",
+    "matplotlib>=3.10.9",
+    "numpy>=2.4.4",
+    "orjson>=3.11.8",
+    "pip>=26.1.1",
+    "polars>=1.40.1",
+    "pydantic>=2.13.3",
+    "pydub>=0.25.1",
+    "scikit-learn>=1.8.0",
+    "scipy>=1.17.1",
+    "scipy-stubs>=1.17.1.4",
+    "soundfile>=0.13.1",
+    "torch>=2.6.0",
+    "torchaudio>=2.6.0",
+    "torchvision>=0.21.0",
+    "torchcodec>=0.11.1",
+    "tqdm>=4.67.3",
+    "zstandard>=0.25.0",
+    "jiwer>=4.0.0",
+    "peft>=0.19.1",
+    "transformers>=5.8.1",
+]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }
+torchaudio = { index = "pytorch-cu124" }
+torchvision = { index = "pytorch-cu124" }
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.39.3",
+    "ruff>=0.15.12",
+]
